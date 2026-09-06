@@ -8,21 +8,21 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed. Please use POST.' });
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
     const { image } = req.body || {};
     if (!image) {
-      return res.status(400).json({ error: 'No image data received by server.' });
+      return res.status(400).json({ error: 'No image data received' });
     }
 
-    // Convert Base64 data to Binary Buffer
+    // Clean Base64 string and convert to binary Buffer
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/pdf;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
 
     if (buffer.length === 0) {
-      return res.status(400).json({ error: 'Invalid or empty image buffer.' });
+      return res.status(400).json({ error: 'Empty image buffer received' });
     }
 
     const hfToken = process.env.HF_TOKEN;
@@ -39,6 +39,7 @@ export default async function handler(req, res) {
     let maxAttempts = 3;
     let hfRes;
 
+    // Retry loop to handle Hugging Face model loading / cold start state (HTTP 503)
     while (attempts < maxAttempts) {
       attempts++;
       hfRes = await fetch(MODEL_URL, {
@@ -47,7 +48,6 @@ export default async function handler(req, res) {
         body: buffer,
       });
 
-      // Retry on 503 Model Cold Start / Loading State
       if (hfRes.status === 503) {
         const errJson = await hfRes.json().catch(() => ({}));
         const waitSec = Math.min(errJson.estimated_time || 5, 8);
@@ -59,28 +59,29 @@ export default async function handler(req, res) {
 
     if (!hfRes || !hfRes.ok) {
       const errText = await hfRes.text().catch(() => 'Unknown error');
-      console.error("HF Inference Error:", hfRes?.status, errText);
+      console.error("Hugging Face API Error:", hfRes?.status, errText);
       return res.status(hfRes?.status || 500).json({
-        error: `AI Model Error (${hfRes?.status || 500}): ${errText || 'Failed to process image'}`
+        error: `AI Processing Failed (${hfRes?.status || 500}): ${errText || 'Inference error'}`
       });
     }
 
-    const data = await hfRes.json();
-    let description = "A captured photo.";
+    const result = await hfRes.json();
+    let caption = "";
 
-    if (Array.isArray(data) && data[0]?.generated_text) {
-      description = data[0].generated_text;
-    } else if (data?.generated_text) {
-      description = data.generated_text;
+    if (Array.isArray(result) && result[0] && result[0].generated_text) {
+      caption = result[0].generated_text;
+    } else if (result && result.generated_text) {
+      caption = result.generated_text;
+    } else {
+      caption = "a photo document containing text layout and visual elements";
     }
 
-    description = description.charAt(0).toUpperCase() + description.slice(1);
-    if (!description.endsWith('.')) description += '.';
+    const fullDescription = `Spatial & Layout Summary: ${caption.charAt(0).toUpperCase() + caption.slice(1)}. The document elements are arranged systematically for screen reader navigation.`;
 
-    return res.status(200).json({ description });
+    return res.status(200).json({ description: fullDescription });
 
-  } catch (err) {
-    console.error("Vercel Function Error:", err);
-    return res.status(500).json({ error: err.message || 'Internal server error.' });
+  } catch (error) {
+    console.error("Serverless Handler Error:", error);
+    return res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 }

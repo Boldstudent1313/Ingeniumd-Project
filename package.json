@@ -1,8 +1,8 @@
 {
-  "name": "accessible-vision-analyzer",
+  "name": "ai-accessible-reader",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vercel dev"
+    "build": "echo 'No build step required'"
   }
 }

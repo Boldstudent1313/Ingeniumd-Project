@@ -22,6 +22,7 @@
     .result-box { margin-top: 2rem; padding: 1.5rem; background: #1a1a1a; border-left: 8px solid #ffff00; border-radius: 4px; display: none; }
     .result-box h2 { color: #ffff00; margin-top: 0; }
     .error-text { color: #ff6b6b; font-weight: bold; }
+    .loading-text { color: #58a6ff; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -56,24 +57,18 @@
     
     let compressedBase64Payload = "";
 
-    // Helper: Resizes large images to max 800px dimension and converts to JPEG to prevent Vercel 4.5MB limit errors
     function getCompressedImageData(source, maxDim = 800) {
       let w = source.width || source.videoWidth;
       let h = source.height || source.videoHeight;
-
       if (w > maxDim || h > maxDim) {
         if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
         else { w = Math.round((w * maxDim) / h); h = maxDim; }
       }
-
-      previewCanvas.width = w;
-      previewCanvas.height = h;
+      previewCanvas.width = w; previewCanvas.height = h;
       const ctx = previewCanvas.getContext('2d');
       ctx.drawImage(source, 0, 0, w, h);
       previewCanvas.style.display = 'block';
-
-      const dataUrl = previewCanvas.toDataURL('image/jpeg', 0.85);
-      return dataUrl.split(',')[1];
+      return previewCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
     }
 
     fileInput.addEventListener('change', async (e) => {
@@ -83,20 +78,17 @@
       uploadText.innerText = "Processing file: " + file.name;
       window.speechSynthesis.cancel();
       resultBox.style.display = 'none';
+      analyzeBtn.disabled = true;
 
       try {
         if (file.type === "application/pdf") {
           const fileArrayBuffer = await file.arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
           const page = await pdf.getPage(1);
-          
           const viewport = page.getViewport({ scale: 1.5 });
           const tempCanvas = document.createElement('canvas');
-          tempCanvas.height = viewport.height;
-          tempCanvas.width = viewport.width;
-          const context = tempCanvas.getContext('2d');
-          
-          await page.render({ canvasContext: context, viewport: viewport }).promise;
+          tempCanvas.height = viewport.height; tempCanvas.width = viewport.width;
+          await page.render({ canvasContext: tempCanvas.getContext('2d'), viewport: viewport }).promise;
           compressedBase64Payload = getCompressedImageData(tempCanvas);
         } else {
           const reader = new FileReader();
@@ -112,53 +104,66 @@
           reader.readAsDataURL(file);
           return;
         }
-
         analyzeBtn.disabled = false;
         analyzeBtn.focus();
       } catch (err) {
-        uploadText.innerText = "Error loading file. Please try a different photo or PDF.";
+        uploadText.innerText = "Error loading file. Please try a different format.";
         console.error(err);
       }
     });
 
-    analyzeBtn.addEventListener('click', async () => {
-      if (!compressedBase64Payload) return;
-
-      analyzeBtn.disabled = true;
-      analyzeBtn.innerText = "Analyzing file with AI...";
-      altText.classList.remove('error-text');
-
+    // Recursive function to handle model waking up without triggering Vercel timeout
+    async function performAnalysis(payload, retryCount = 0) {
       try {
         const response = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedBase64Payload })
+          body: JSON.stringify({ image: payload })
         });
 
-        const data = await response.json();
+        const data = await response.json().catch(() => null);
 
-        if (!response.ok) {
-          throw new Error(data.error || `Server HTTP status ${response.status}`);
+        // Check for 503 Model Waking Up status
+        if (response.status === 503) {
+          if (retryCount >= 4) throw new Error("AI Model took too long to wake up. Please try again.");
+          
+          const waitSecs = Math.min(data?.waitTime || 10, 15);
+          altText.className = 'loading-text';
+          altText.innerText = `Waking up AI model... This takes about ${Math.round(waitSecs)} seconds. Please wait.`;
+          resultBox.style.display = 'block';
+          
+          await new Promise(r => setTimeout(r, waitSecs * 1000));
+          return performAnalysis(payload, retryCount + 1); // Try again
         }
 
-        const description = data.description;
-        altText.innerText = description;
+        if (!response.ok) {
+          throw new Error((data && data.error) ? data.error : `HTTP Error ${response.status}`);
+        }
+
+        altText.className = '';
+        altText.innerText = data.description;
         resultBox.style.display = 'block';
         resultBox.focus();
 
-        // High-Quality Text-to-Speech
-        const utterance = new SpeechSynthesisUtterance(description);
+        const utterance = new SpeechSynthesisUtterance(data.description);
         utterance.rate = 1.0;
         window.speechSynthesis.speak(utterance);
 
       } catch (err) {
+        altText.className = 'error-text';
         altText.innerText = "Analysis Error: " + err.message;
-        altText.classList.add('error-text');
         resultBox.style.display = 'block';
       } finally {
         analyzeBtn.disabled = false;
         analyzeBtn.innerText = "Analyze & Read Aloud";
       }
+    }
+
+    analyzeBtn.addEventListener('click', () => {
+      if (!compressedBase64Payload) return;
+      analyzeBtn.disabled = true;
+      analyzeBtn.innerText = "Analyzing file with AI...";
+      performAnalysis(compressedBase64Payload, 0);
     });
   </script>
 </body>

@@ -1,137 +1,312 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Accessibility Screen Reader</title>
-  <!-- PDF.js library for client-side PDF rendering -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Accessible Vision & Document Analyzer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.8; background-color: #000000; color: #ffffff; font-size: 1.2rem; }
-    .card { background: #121212; padding: 2.5rem; border-radius: 12px; border: 3px solid #ffff00; }
-    h1 { margin-top: 0; font-size: 2.2rem; color: #ffff00; border-bottom: 2px solid #ffff00; padding-bottom: 10px; }
-    
-    .upload-area { border: 4px dashed #ffff00; padding: 2.5rem; text-align: center; border-radius: 8px; margin: 2rem 0; cursor: pointer; display: block; background: #1a1a1a; }
-    .upload-area:hover, .upload-area:focus { background: #333300; outline: 4px solid #ffffff; }
-    input[type="file"] { opacity: 0; position: absolute; z-index: -1; }
-    
-    button { background: #ffff00; color: #000000; border: 3px solid #ffff00; padding: 15px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 1.4rem; margin-top: 1rem; }
-    button:hover, button:focus { background: #ffffff; border-color: #ffffff; outline: 4px solid #ffff00; }
-    button:disabled { background: #444; border-color: #444; color: #888; cursor: not-allowed; }
-    
-    #previewCanvas { max-width: 100%; border-radius: 8px; margin-top: 1.5rem; display: none; border: 2px solid #ffff00; }
-    .result-box { margin-top: 2rem; padding: 1.5rem; background: #1a1a1a; border-left: 8px solid #ffff00; border-radius: 4px; display: none; }
-    .result-box h2 { color: #ffff00; margin-top: 0; }
+    :root {
+      --bg-color: #0d1117;
+      --card-bg: #161b22;
+      --text-color: #f0f6fc;
+      --accent-color: #58a6ff;
+      --accent-hover: #1f6feb;
+      --border-color: #30363d;
+      --error-color: #f85149;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 700px;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-size: 1.6rem;
+      margin-top: 0;
+      color: var(--accent-color);
+      text-align: center;
+    }
+    .dropzone {
+      border: 2px dashed var(--accent-color);
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 20px;
+      transition: background 0.2s ease;
+    }
+    .dropzone:focus, .dropzone:hover {
+      background: rgba(88, 166, 255, 0.1);
+      outline: 3px solid var(--accent-color);
+    }
+    input[type="file"] { display: none; }
+    button {
+      background-color: var(--accent-color);
+      color: #ffffff;
+      border: none;
+      padding: 12px 20px;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 10px;
+      transition: background 0.2s ease;
+    }
+    button:hover, button:focus {
+      background-color: var(--accent-hover);
+      outline: 3px solid #ffffff;
+    }
+    button:disabled {
+      background-color: var(--border-color);
+      cursor: not-allowed;
+    }
+    .preview-container { text-align: center; margin: 15px 0; }
+    #imagePreview {
+      max-width: 100%;
+      max-height: 300px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      display: none;
+    }
+    .status-box {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #010409;
+      border: 1px solid var(--border-color);
+      min-height: 80px;
+    }
+    .error-box {
+      color: var(--error-color);
+      border-color: var(--error-color);
+      display: none;
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 6px;
+      background: rgba(248, 81, 73, 0.1);
+    }
+    .controls { display: flex; gap: 10px; margin-top: 15px; }
+    .controls button { flex: 1; }
   </style>
 </head>
 <body>
-  <main class="card">
-    <h1 tabindex="0">AI Accessible Reader</h1>
-    <p tabindex="0">Upload an Image or PDF document. The AI will describe its visual layout and read it aloud.</p>
+  <div class="container" role="main">
+    <h1>Accessible Vision & Document Analyzer</h1>
     
-    <label class="upload-area" for="fileInput" tabindex="0" role="button" aria-label="Press Enter or Click to select an image or PDF file">
-      <span id="uploadText">Click or press Enter here to select a file (PNG, JPG, PDF)</span>
-      <input type="file" id="fileInput" accept="image/*,application/pdf" />
-    </label>
-    
-    <canvas id="previewCanvas" aria-hidden="true"></canvas>
-    
-    <button id="analyzeBtn" disabled aria-live="polite">Analyze & Read Aloud</button>
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload photo or PDF file. Click or drag and drop here.">
+      <p id="dropText">Click or Drag & Drop Photo or PDF here</p>
+      <input type="file" id="fileInput" accept="image/*,application/pdf">
+    </div>
 
-    <section class="result-box" id="resultBox" aria-live="assertive" tabindex="-1">
-      <h2>Generated Description</h2>
-      <p id="altText"></p>
-    </section>
-  </main>
+    <div class="preview-container">
+      <img id="imagePreview" alt="Uploaded file preview">
+    </div>
+
+    <button id="analyzeBtn" disabled aria-label="Analyze photo and generate description">Analyze File</button>
+
+    <div id="errorBox" class="error-box" role="alert" aria-live="assertive"></div>
+
+    <div class="status-box" id="resultRegion" role="region" aria-live="polite" aria-label="Analysis Results">
+      <h2 style="font-size: 1.1rem; margin-top: 0;">Description:</h2>
+      <p id="descriptionText">No file analyzed yet. Select a photo or PDF above and click Analyze.</p>
+    </div>
+
+    <div class="controls">
+      <button id="speakBtn" disabled aria-label="Read description aloud">🔊 Read Aloud</button>
+      <button id="stopBtn" disabled aria-label="Stop text to speech">⏹️ Stop</button>
+    </div>
+  </div>
 
   <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
 
+    const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
-    const previewCanvas = document.getElementById('previewCanvas');
+    const dropText = document.getElementById('dropText');
+    const imagePreview = document.getElementById('imagePreview');
     const analyzeBtn = document.getElementById('analyzeBtn');
-    const uploadText = document.getElementById('uploadText');
-    const resultBox = document.getElementById('resultBox');
-    const altText = document.getElementById('altText');
-    
-    let base64ImagePayload = "";
+    const descriptionText = document.getElementById('descriptionText');
+    const errorBox = document.getElementById('errorBox');
+    const speakBtn = document.getElementById('speakBtn');
+    const stopBtn = document.getElementById('stopBtn');
 
-    fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+    let currentCompressedBase64 = null;
 
-      uploadText.innerText = "Processing file: " + file.name;
-      window.speechSynthesis.cancel();
-      resultBox.style.display = 'none';
-
-      if (file.type === "application/pdf") {
-        const fileArrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
-        const page = await pdf.getPage(1);
-        
-        const viewport = page.getViewport({ scale: 1.5 });
-        const context = previewCanvas.getContext('2d');
-        previewCanvas.height = viewport.height;
-        previewCanvas.width = viewport.width;
-        
-        await page.render({ canvasContext: context, viewport: viewport }).promise;
-        previewCanvas.style.display = 'block';
-        
-        base64ImagePayload = previewCanvas.toDataURL('image/png').split(',')[1];
-      } else {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const img = new Image();
-          img.onload = () => {
-            const context = previewCanvas.getContext('2d');
-            previewCanvas.width = img.width;
-            previewCanvas.height = img.height;
-            context.drawImage(img, 0, 0);
-            previewCanvas.style.display = 'block';
-          };
-          img.src = evt.target.result;
-          base64ImagePayload = evt.target.result.split(',')[1];
-        };
-        reader.readAsDataURL(file);
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
       }
-
-      analyzeBtn.disabled = false;
-      analyzeBtn.focus();
     });
 
-    analyzeBtn.addEventListener('click', async () => {
-      if (!base64ImagePayload) return;
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.background = 'rgba(88, 166, 255, 0.2)';
+    });
 
-      analyzeBtn.disabled = true;
-      analyzeBtn.innerText = "Analyzing file with AI...";
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.background = 'transparent';
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.background = 'transparent';
+      if (e.dataTransfer.files.length > 0) {
+        handleFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+      }
+    });
+
+    async function handleFileSelect(file) {
+      errorBox.style.display = 'none';
+      descriptionText.textContent = "File loaded. Ready to analyze.";
+      dropText.textContent = `Selected: ${file.name}`;
 
       try {
-        const response = await fetch('/api/analyze', {
+        if (file.type === 'application/pdf') {
+          currentCompressedBase64 = await processPdf(file);
+        } else if (file.type.startsWith('image/')) {
+          currentCompressedBase64 = await compressImageFile(file);
+        } else {
+          showError("Unsupported file type. Please upload a photo or PDF.");
+          return;
+        }
+
+        imagePreview.src = currentCompressedBase64;
+        imagePreview.style.display = 'block';
+        analyzeBtn.disabled = false;
+      } catch (err) {
+        showError("Failed to process file locally: " + err.message);
+      }
+    }
+
+    function compressImageFile(file, maxDim = 800) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = () => reject(new Error("Image loading failed"));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error("File reading failed"));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function processPdf(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 1.5 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+      let w = canvas.width, h = canvas.height, maxDim = 800;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+        else { w = Math.round((w * maxDim) / h); h = maxDim; }
+      }
+      const scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = w; scaledCanvas.height = h;
+      scaledCanvas.getContext('2d').drawImage(canvas, 0, 0, w, h);
+
+      return scaledCanvas.toDataURL('image/jpeg', 0.85);
+    }
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!currentCompressedBase64) return;
+
+      errorBox.style.display = 'none';
+      descriptionText.textContent = "Analyzing file with AI... Please wait.";
+      analyzeBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64ImagePayload })
+          body: JSON.stringify({ image: currentCompressedBase64 })
         });
 
-        if (!response.ok) throw new Error("Server error");
+        const data = await res.json();
 
-        const data = await response.json();
-        const description = data.description;
+        if (!res.ok) {
+          throw new Error(data.error || `Server responded with status ${res.status}`);
+        }
 
-        altText.innerText = description;
-        resultBox.style.display = 'block';
-        resultBox.focus();
-
-        // Native High-Quality Text-to-Speech
-        const utterance = new SpeechSynthesisUtterance(description);
-        utterance.rate = 1.0;
-        window.speechSynthesis.speak(utterance);
-
+        descriptionText.textContent = data.description;
+        speakBtn.disabled = false;
+        speakText(data.description);
       } catch (err) {
-        altText.innerText = "Error analyzing file. Please try again.";
-        resultBox.style.display = 'block';
+        showError("Analysis Error: " + err.message);
+        descriptionText.textContent = "Failed to obtain description.";
       } finally {
         analyzeBtn.disabled = false;
-        analyzeBtn.innerText = "Analyze & Read Aloud";
+      }
+    });
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.style.display = 'block';
+    }
+
+    function speakText(text) {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => { stopBtn.disabled = true; };
+      window.speechSynthesis.speak(utterance);
+      stopBtn.disabled = false;
+    }
+
+    speakBtn.addEventListener('click', () => {
+      if (descriptionText.textContent) speakText(descriptionText.textContent);
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        stopBtn.disabled = true;
       }
     });
   </script>

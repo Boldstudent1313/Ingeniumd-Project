@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Accessibility Screen Reader</title>
+  <title>Accessible Text Parser & Reader</title>
+  <!-- PDF.js for reading PDF documents -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- Tesseract.js for extracting text from images -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
   <style>
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.8; background-color: #000000; color: #ffffff; font-size: 1.2rem; }
     .card { background: #121212; padding: 2.5rem; border-radius: 12px; border: 3px solid #ffff00; }
@@ -18,137 +21,119 @@
     button:hover, button:focus { background: #ffffff; border-color: #ffffff; outline: 4px solid #ffff00; }
     button:disabled { background: #444; border-color: #444; color: #888; cursor: not-allowed; }
     
-    #previewCanvas { max-width: 100%; border-radius: 8px; margin-top: 1.5rem; display: none; border: 2px solid #ffff00; }
     .result-box { margin-top: 2rem; padding: 1.5rem; background: #1a1a1a; border-left: 8px solid #ffff00; border-radius: 4px; display: none; }
     .result-box h2 { color: #ffff00; margin-top: 0; }
-    .error-text { color: #ff6b6b; font-weight: bold; }
+    .status-text { color: #58a6ff; font-weight: bold; margin-top: 1rem; }
   </style>
 </head>
 <body>
   <main class="card">
-    <h1 tabindex="0">AI Accessible Reader</h1>
-    <p tabindex="0">Upload an Image or PDF document. The AI will describe its visual layout and read it aloud.</p>
+    <h1 tabindex="0">Accessible Text Parser & Reader</h1>
+    <p tabindex="0">Upload an Image or PDF document. The app will extract all readable text and read it aloud instantly.</p>
     
-    <label class="upload-area" for="fileInput" tabindex="0" role="button" aria-label="Press Enter or Click to select an image or PDF file">
+    <label class="upload-area" for="fileInput" tabindex="0" role="button" aria-label="Select an image or PDF file">
       <span id="uploadText">Click or press Enter here to select a file (PNG, JPG, PDF)</span>
       <input type="file" id="fileInput" accept="image/*,application/pdf" />
     </label>
     
-    <canvas id="previewCanvas" aria-hidden="true"></canvas>
-    
-    <button id="analyzeBtn" disabled aria-live="polite">Analyze & Read Aloud</button>
+    <div id="statusText" class="status-text" aria-live="polite"></div>
 
     <section class="result-box" id="resultBox" aria-live="assertive" tabindex="-1">
-      <h2>Generated Description</h2>
-      <p id="altText"></p>
+      <h2>Extracted Text</h2>
+      <p id="extractedTextContent" style="white-space: pre-wrap;"></p>
     </section>
+
+    <button id="readAloudBtn" style="display:none;">🔊 Read Again</button>
   </main>
 
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
     const fileInput = document.getElementById('fileInput');
-    const previewCanvas = document.getElementById('previewCanvas');
-    const analyzeBtn = document.getElementById('analyzeBtn');
     const uploadText = document.getElementById('uploadText');
+    const statusText = document.getElementById('statusText');
     const resultBox = document.getElementById('resultBox');
-    const altText = document.getElementById('altText');
-    
-    let compressedBase64Payload = "";
-    let selectedFileName = "";
+    const extractedTextContent = document.getElementById('extractedTextContent');
+    const readAloudBtn = document.getElementById('readAloudBtn');
 
-    function getCompressedImageData(source, maxDim = 800) {
-      let w = source.width || source.videoWidth;
-      let h = source.height || source.videoHeight;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-        else { w = Math.round((w * maxDim) / h); h = maxDim; }
-      }
-      previewCanvas.width = w; previewCanvas.height = h;
-      const ctx = previewCanvas.getContext('2d');
-      ctx.drawImage(source, 0, 0, w, h);
-      previewCanvas.style.display = 'block';
-      return previewCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    }
+    let lastExtractedText = "";
 
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
-      selectedFileName = file.name;
-      uploadText.innerText = "Processing file: " + file.name;
+      uploadText.innerText = "Selected: " + file.name;
       window.speechSynthesis.cancel();
       resultBox.style.display = 'none';
-      analyzeBtn.disabled = true;
+      readAloudBtn.style.display = 'none';
+      statusText.innerText = "Extracting text from file...";
 
       try {
+        let text = "";
+
         if (file.type === "application/pdf") {
-          const fileArrayBuffer = await file.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
-          const page = await pdf.getPage(1);
-          const viewport = page.getViewport({ scale: 1.5 });
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.height = viewport.height; tempCanvas.width = viewport.width;
-          await page.render({ canvasContext: tempCanvas.getContext('2d'), viewport: viewport }).promise;
-          compressedBase64Payload = getCompressedImageData(tempCanvas);
+          text = await extractTextFromPDF(file);
+        } else if (file.type.startsWith("image/")) {
+          text = await extractTextFromImage(file);
         } else {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            const img = new Image();
-            img.onload = () => {
-              compressedBase64Payload = getCompressedImageData(img);
-              analyzeBtn.disabled = false;
-              analyzeBtn.focus();
-            };
-            img.src = evt.target.result;
-          };
-          reader.readAsDataURL(file);
-          return;
+          throw new Error("Unsupported file type. Please upload a PDF or Image.");
         }
-        analyzeBtn.disabled = false;
-        analyzeBtn.focus();
+
+        if (!text || text.trim().length === 0) {
+          text = "No readable text found in this file.";
+        }
+
+        lastExtractedText = text;
+        statusText.innerText = "Text extraction complete!";
+        extractedTextContent.innerText = text;
+        resultBox.style.display = 'block';
+        resultBox.focus();
+        readAloudBtn.style.display = 'block';
+
+        speakText(text);
+
       } catch (err) {
-        uploadText.innerText = "Error loading file. Please try another image.";
-        console.error(err);
+        statusText.innerText = "Error: " + err.message;
       }
     });
 
-    analyzeBtn.addEventListener('click', async () => {
-      if (!compressedBase64Payload) return;
+    async function extractTextFromPDF(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
 
-      analyzeBtn.disabled = true;
-      analyzeBtn.innerText = "Analyzing file with AI...";
-      altText.className = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const tokenizedText = await page.getTextContent();
+        const pageText = tokenizedText.items.map(item => item.str).join(' ');
+        fullText += `--- Page ${i} ---\n` + pageText + "\n\n";
+      }
+      return fullText;
+    }
 
-      try {
-        const response = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedBase64Payload, fileName: selectedFileName })
-        });
+    async function extractTextFromImage(file) {
+      statusText.innerText = "Scanning image for text (OCR in progress)...";
+      const result = await Tesseract.recognize(file, 'eng', {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            statusText.innerText = `OCR Progress: ${Math.round(m.progress * 100)}%`;
+          }
+        }
+      });
+      return result.data.text;
+    }
 
-        const data = await response.json();
-        const description = data.description || "Layout summary generated successfully.";
+    function speakText(text) {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
 
-        altText.innerText = description;
-        resultBox.style.display = 'block';
-        resultBox.focus();
-
-        const utterance = new SpeechSynthesisUtterance(description);
-        utterance.rate = 1.0;
-        window.speechSynthesis.speak(utterance);
-
-      } catch (err) {
-        // Ultimate client-side fallback if network totally fails
-        const fallbackDesc = `Layout Summary for ${selectedFileName}: Document structure verified successfully with standard text and visual grid layout components.`;
-        altText.innerText = fallbackDesc;
-        resultBox.style.display = 'block';
-
-        const utterance = new SpeechSynthesisUtterance(fallbackDesc);
-        window.speechSynthesis.speak(utterance);
-      } finally {
-        analyzeBtn.disabled = false;
-        analyzeBtn.innerText = "Analyze & Read Aloud";
+    readAloudBtn.addEventListener('click', () => {
+      if (lastExtractedText) {
+        speakText(lastExtractedText);
       }
     });
   </script>

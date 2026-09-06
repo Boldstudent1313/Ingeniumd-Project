@@ -2,10 +2,7 @@
   "name": "ai-accessible-reader",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": "20.x"
-  },
   "scripts": {
-    "build": "echo 'No build step required'"
+    "build": "echo 'No build step required for static frontend'"
   }
 }

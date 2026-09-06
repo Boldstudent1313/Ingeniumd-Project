@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Accessibility Screen Reader</title>
+  <!-- PDF.js library for client-side PDF rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.8; background-color: #000000; color: #ffffff; font-size: 1.2rem; }
+    .card { background: #121212; padding: 2.5rem; border-radius: 12px; border: 3px solid #ffff00; }
+    h1 { margin-top: 0; font-size: 2.2rem; color: #ffff00; border-bottom: 2px solid #ffff00; padding-bottom: 10px; }
+    
+    .upload-area { border: 4px dashed #ffff00; padding: 2.5rem; text-align: center; border-radius: 8px; margin: 2rem 0; cursor: pointer; display: block; background: #1a1a1a; }
+    .upload-area:hover, .upload-area:focus { background: #333300; outline: 4px solid #ffffff; }
+    input[type="file"] { opacity: 0; position: absolute; z-index: -1; }
+    
+    button { background: #ffff00; color: #000000; border: 3px solid #ffff00; padding: 15px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 1.4rem; margin-top: 1rem; }
+    button:hover, button:focus { background: #ffffff; border-color: #ffffff; outline: 4px solid #ffff00; }
+    button:disabled { background: #444; border-color: #444; color: #888; cursor: not-allowed; }
+    
+    #previewCanvas { max-width: 100%; border-radius: 8px; margin-top: 1.5rem; display: none; border: 2px solid #ffff00; }
+    .result-box { margin-top: 2rem; padding: 1.5rem; background: #1a1a1a; border-left: 8px solid #ffff00; border-radius: 4px; display: none; }
+    .result-box h2 { color: #ffff00; margin-top: 0; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1 tabindex="0">AI Accessible Reader</h1>
+    <p tabindex="0">Upload an Image or PDF document. The AI will describe its visual layout and read it aloud.</p>
+    
+    <label class="upload-area" for="fileInput" tabindex="0" role="button" aria-label="Press Enter or Click to select an image or PDF file">
+      <span id="uploadText">Click or press Enter here to select a file (PNG, JPG, PDF)</span>
+      <input type="file" id="fileInput" accept="image/*,application/pdf" />
+    </label>
+    
+    <canvas id="previewCanvas" aria-hidden="true"></canvas>
+    
+    <button id="analyzeBtn" disabled aria-live="polite">Analyze & Read Aloud</button>
+
+    <section class="result-box" id="resultBox" aria-live="assertive" tabindex="-1">
+      <h2>Generated Description</h2>
+      <p id="altText"></p>
+    </section>
+  </main>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const fileInput = document.getElementById('fileInput');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const uploadText = document.getElementById('uploadText');
+    const resultBox = document.getElementById('resultBox');
+    const altText = document.getElementById('altText');
+    
+    let base64ImagePayload = "";
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      uploadText.innerText = "Processing file: " + file.name;
+      window.speechSynthesis.cancel();
+      resultBox.style.display = 'none';
+
+      if (file.type === "application/pdf") {
+        const fileArrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
+        const page = await pdf.getPage(1);
+        
+        const viewport = page.getViewport({ scale: 1.5 });
+        const context = previewCanvas.getContext('2d');
+        previewCanvas.height = viewport.height;
+        previewCanvas.width = viewport.width;
+        
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        previewCanvas.style.display = 'block';
+        
+        base64ImagePayload = previewCanvas.toDataURL('image/png').split(',')[1];
+      } else {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const img = new Image();
+          img.onload = () => {
+            const context = previewCanvas.getContext('2d');
+            previewCanvas.width = img.width;
+            previewCanvas.height = img.height;
+            context.drawImage(img, 0, 0);
+            previewCanvas.style.display = 'block';
+          };
+          img.src = evt.target.result;
+          base64ImagePayload = evt.target.result.split(',')[1];
+        };
+        reader.readAsDataURL(file);
+      }
+
+      analyzeBtn.disabled = false;
+      analyzeBtn.focus();
+    });
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!base64ImagePayload) return;
+
+      analyzeBtn.disabled = true;
+      analyzeBtn.innerText = "Analyzing file with AI...";
+
+      try {
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64ImagePayload })
+        });
+
+        if (!response.ok) throw new Error("Server error");
+
+        const data = await response.json();
+        const description = data.description;
+
+        altText.innerText = description;
+        resultBox.style.display = 'block';
+        resultBox.focus();
+
+        // Native High-Quality Text-to-Speech
+        const utterance = new SpeechSynthesisUtterance(description);
+        utterance.rate = 1.0;
+        window.speechSynthesis.speak(utterance);
+
+      } catch (err) {
+        altText.innerText = "Error analyzing file. Please try again.";
+        resultBox.style.display = 'block';
+      } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerText = "Analyze & Read Aloud";
+      }
+    });
+  </script>
+</body>
+</html>
